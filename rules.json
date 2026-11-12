@@ -1,0 +1,36 @@
+{
+  "defaultMode": "keyword",
+
+  "quiz": {
+    "replies": [
+      "Thanks for commenting! The result will be out soon. It will be pinned here",
+      "Got your comment, {username}! Results will be out soon, so watch the pinned comment",
+      "Thanks! The result comes out soon and will be pinned at the top",
+      "Noted! Results will be out soon. The answer will be pinned"
+    ]
+  },
+
+  "link": {
+    "trigger": "keywords",
+    "keywords": ["link", "links"],
+    "url": "https://google.com",
+    "publicReplies": [
+      "Thanks! Sent you a DM, please check your inbox",
+      "Thanks for commenting! Check your DMs (or message requests)",
+      "Done, {username}! I just sent it to you in DM ",
+      "Thanks! It's in your DMs now. Look in message requests if you don't see it in inbox"
+    ],
+    "dm": [
+      "Hi {username}! Here is the link: {link}\n\nNote: this is your link",
+      "Hey {username}, thanks for commenting! Here you go: {link}\n\n(This is an affiliate link.)",
+      "Hello {username}! As promised, here is the link: {link}\n\nJust so you know, it is an affiliate link and I may earn a little from it.",
+      "Thanks for your comment, {username}! This is the link: {link}\n\n(Affiliate link: I may get a small commission.)"
+    ]
+  },
+
+  "posts": {
+    "PUT_A_MEDIA_ID_HERE": {
+      "mode": "link"
+    }
+  }
+}

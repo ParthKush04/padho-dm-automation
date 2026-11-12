@@ -1,0 +1,13 @@
+# Secrets: never upload these
+.env
+*.env
+Access Token*.txt
+*token*.txt
+
+# The bot's memory (stays on your laptop or in MongoDB)
+state.json
+state.dryrun.json
+*.tmp
+
+# Installed packages
+node_modules/
