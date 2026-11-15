@@ -1,33 +1,35 @@
 {
   "defaultMode": "keyword",
-
   "quiz": {
     "replies": [
-      "Thanks for commenting! The result will be out soon. It will be pinned here",
-      "Got your comment, {username}! Results will be out soon, so watch the pinned comment",
-      "Thanks! The result comes out soon and will be pinned at the top",
-      "Noted! Results will be out soon. The answer will be pinned"
+      "Thanks for commenting! The result will be out soon. It will be pinned here 📌",
+      "Got your comment, {username}! Results will be out soon, so watch the pinned comment 👀",
+      "Thanks! The result comes out soon and will be pinned at the top ⏳",
+      "Noted! Results will be out soon. The answer will be pinned 📌"
     ]
   },
-
   "link": {
     "trigger": "keywords",
-    "keywords": ["link", "links"],
-    "url": "https://refer.micro1.ai/referral/jobs?referralCode=925af3ad-e64b-44b6-9fc0-89fd6e559412&utm_source=referral&utm_medium=share&utm_campaign=job_referral",
+    "keywords": [
+      "link",
+      "links"
+    ],
+    "url": "https://jobs.micro1.ai/post/d092dbbf-f5e8-4fe7-8372-fdce57e183f4?referralCode=925af3ad-e64b-44b6-9fc0-89fd6e559412&utm_source=referral&utm_medium=share&utm_campaign=job_referral",
+    "dmStyle": "button",
+    "buttonText": "Open link 🔗",
     "publicReplies": [
-      "Thanks! Sent you a DM, please check your inbox",
+      "Thanks! Sent you a DM, please check inbox",
       "Thanks for commenting! Check your DMs (or message requests)",
-      "Done, {username}! I just sent it to you in DM ",
-      "Thanks! It's in your DMs now. Look in message requests if you don't see it in inbox"
+      "Done, {username}! I just sent it to you in DM",
+      "Thanks! It's in your DMs now. Look in message requests if you don't see it inbox"
     ],
     "dm": [
-      "Hi {username}! Here is the link: {link}\n\nNote: this is your link",
-      "Hey {username}, thanks for commenting! Here you go: {link}\n\n(This is an affiliate link.)",
-      "Hello {username}! As promised, here is the link: {link}\n\nJust so you know, it is an affiliate link and I may earn a little from it.",
-      "Thanks for your comment, {username}! This is the link: {link}\n\n(Affiliate link: I may get a small commission.)"
+      "Hi {username}! Here is the link you asked for. Tap the button below {link}\n\n",
+      "Hey {username}, thanks for commenting! Tap the button below to open it {link}\n\n",
+      "Hello {username}! As promised, your link is on the button below {link}\n\n",
+      "Thanks for your comment, {username}! Open the link with the button below {link}\n\n"
     ]
   },
-
   "posts": {
     "PUT_A_MEDIA_ID_HERE": {
       "mode": "link"

@@ -158,6 +158,14 @@ function loadRules() {
     throw new FatalError('rules.json: link.trigger must be "any" or "keywords".');
   }
   const keywords = textList(linkRaw.keywords).map((k) => k.trim().toLowerCase());
+  const dmStyle = linkRaw.dmStyle || "text";
+  if (!["text", "button"].includes(dmStyle)) {
+    throw new FatalError('rules.json: link.dmStyle must be "text" or "button".');
+  }
+  const buttonText = typeof linkRaw.buttonText === "string" && linkRaw.buttonText.trim() ? linkRaw.buttonText.trim() : "Open link";
+  if ([...buttonText].length > 20) {
+    throw new FatalError("rules.json: link.buttonText can be at most 20 characters (Instagram's limit).");
+  }
   const link = {
     trigger,
     keywords,
@@ -165,6 +173,8 @@ function loadRules() {
     url: typeof linkRaw.url === "string" ? linkRaw.url.trim() : "",
     dm: textList(linkRaw.dm),
     publicReplies: textList(linkRaw.publicReplies),
+    dmStyle,
+    buttonText,
   };
   if (trigger === "keywords" && !keywords.length) {
     throw new FatalError('rules.json: link.trigger is "keywords" but link.keywords is empty.');
@@ -545,6 +555,28 @@ async function attempt(state, doing, who, call) {
   return { outcome: "failed", message: r.message };
 }
 
+// Builds the DM. In "button" mode the link goes on a tap-able button and the text points to it.
+// Returns { message, style }.
+function buildDm(config, texts, fill, rawText) {
+  const plain = { message: { text: fill(rawText) }, style: "text" };
+  if (config.link.dmStyle !== "button" || !texts.url || !rawText.includes("{link}")) return plain;
+  const body = fill(rawText.replaceAll("{link}", "👇")).slice(0, 640);
+  return {
+    message: {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: body,
+          buttons: [{ type: "web_url", url: texts.url, title: config.link.buttonText }],
+        },
+      },
+    },
+    style: "button",
+    fallback: plain.message,
+  };
+}
+
 async function sendPending(state, config) {
   const pending = Object.entries(state.comments)
     .filter(([, rec]) => rec.status === "pending")
@@ -610,14 +642,20 @@ async function sendPending(state, config) {
         dmCapLogged = true;
         continue;
       }
-      const text = fill(pickFresh(state, "dm", texts.dm));
+      const dm = buildDm(config, texts, fill, pickFresh(state, "dm", texts.dm));
       if (DRY_RUN) {
-        log(`[DRY RUN] Would DM ${who}: "${short(text, 70)}"`);
+        const shown = dm.style === "button" ? `${dm.message.attachment.payload.text} [button: ${config.link.buttonText}]` : dm.message.text;
+        log(`[DRY RUN] Would DM ${who}: "${short(shown, 70)}"`);
         rec.dm = true;
       } else {
-        const a = await attempt(state, "sending a DM", who, () =>
-          api("POST", `/${IG_ID}/messages`, null, { recipient: { comment_id: commentId }, message: { text } })
-        );
+        const send = (message) =>
+          attempt(state, "sending a DM", who, () => api("POST", `/${IG_ID}/messages`, null, { recipient: { comment_id: commentId }, message }));
+        let a = await send(dm.message);
+        if (a.outcome === "failed" && dm.style === "button") {
+          // Instagram refused the button. The one allowed DM was not used, so send the plain text version.
+          log(`Button DM to ${who} was refused (${a.message}). Sending the plain text version.`);
+          a = await send(dm.fallback);
+        }
         didSomething = true;
         if (a.outcome === "stop") {
           await persist();
