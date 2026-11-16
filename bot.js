@@ -92,6 +92,7 @@ const REPLY_WINDOW_MS = 6.5 * 24 * 60 * 60 * 1000; // Instagram allows 7 days fo
 const KEEP_RECORDS_MS = 30 * 24 * 60 * 60 * 1000; // forget handled comments after 30 days
 const RATE_LIMIT_PAUSE_MS = 15 * 60 * 1000; // rest for 15 minutes if Instagram says "slow down"
 const HOUR_MS = 60 * 60 * 1000;
+const NEW_POST_WINDOW_MS = 3 * 24 * HOUR_MS; // a post counts as "new" if it was published in the last 3 days
 const MAX_TRIES = 2;
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,38 @@ function textList(value) {
 function makeMatcher(keyword) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu");
+}
+
+// The "no DM" signal: a post whose url is google.com is a riddle post.
+// Every comment on it gets the result reply, and nobody gets a DM.
+function isRiddleUrl(u) {
+  const clean = String(u || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  return clean === "google.com";
+}
+
+// Checks and tidies the settings for one post (from rules.json "posts", "newPosts", or the saved memory).
+function normalizePost(where, p, defaultMode) {
+  p = p || {};
+  const mode = p.mode || defaultMode;
+  if (!MODES.includes(mode)) {
+    throw new FatalError(`rules.json: ${where} has mode "${mode}". Use one of ${MODES.join(", ")}.`);
+  }
+  const postTrigger = p.trigger === undefined ? "" : p.trigger;
+  if (postTrigger && !["any", "keywords"].includes(postTrigger)) {
+    throw new FatalError(`rules.json: ${where} has trigger "${postTrigger}". Use "any" or "keywords".`);
+  }
+  const postKeywords = textList(p.keywords).map((k) => k.trim().toLowerCase());
+  return {
+    mode,
+    trigger: postTrigger, // "" means: use the general link.trigger
+    keywords: postKeywords,
+    matchers: postKeywords.length ? postKeywords.map(makeMatcher) : null, // null means: use the general keywords
+    url: typeof p.url === "string" ? p.url.trim() : "",
+    riddle: isRiddleUrl(p.url), // google.com = riddle post: result reply for every comment, no DM
+    dm: textList(p.dm),
+    publicReplies: textList(p.publicReplies),
+    quizReplies: textList(p.quizReplies),
+  };
 }
 
 function loadRules() {
@@ -191,24 +224,43 @@ function loadRules() {
   const posts = {};
   for (const [mediaId, p] of Object.entries(raw.posts || {})) {
     if (!/^\d+$/.test(mediaId)) continue; // skips the example entry and anything that is not a real ID
-    const mode = (p && p.mode) || defaultMode;
-    if (!MODES.includes(mode)) {
-      throw new FatalError(`rules.json: post ${mediaId} has mode "${mode}". Use one of ${MODES.join(", ")}.`);
-    }
-    posts[mediaId] = {
-      mode,
-      url: typeof p.url === "string" ? p.url.trim() : "",
-      dm: textList(p.dm),
-      publicReplies: textList(p.publicReplies),
-      quizReplies: textList(p.quizReplies),
-    };
+    posts[mediaId] = normalizePost(`post ${mediaId}`, p, defaultMode);
   }
 
-  const modesInUse = new Set([defaultMode, ...Object.values(posts).map((p) => p.mode)]);
+  // "newPosts": settings that are attached automatically to every post you publish from now on.
+  // Each new post keeps the settings it got, even after you change "newPosts" for the next post.
+  let newPosts = null;
+  if (raw.newPosts && raw.newPosts.enabled !== false) {
+    const np = raw.newPosts;
+    // Default: every comment on the new post gets the link by DM (any comment, numbers too).
+    // With url "https://google.com" the post is a riddle post instead: every comment gets the result reply, no DM.
+    const saved = {
+      mode: np.mode || "link",
+      trigger: np.trigger === undefined ? "any" : np.trigger,
+      keywords: textList(np.keywords),
+      url: typeof np.url === "string" ? np.url.trim() : "",
+      dm: textList(np.dm),
+      publicReplies: textList(np.publicReplies),
+      quizReplies: textList(np.quizReplies),
+    };
+    const normalized = normalizePost("newPosts", saved, defaultMode);
+    if (!normalized.url) {
+      throw new FatalError('rules.json: newPosts needs a "url": your referral link, or https://google.com for a riddle post.');
+    }
+    newPosts = { saved, normalized };
+  }
+
+  const modesInUse = new Set([defaultMode, ...Object.values(posts).map((p) => p.mode), ...(newPosts ? [newPosts.normalized.mode] : [])]);
   const usesQuiz = modesInUse.has("keyword") || modesInUse.has("auto") || modesInUse.has("quiz");
   const usesLink = modesInUse.has("keyword") || modesInUse.has("auto") || modesInUse.has("link");
-  if (modesInUse.has("keyword") && !keywords.length) {
-    throw new FatalError('rules.json: link.keywords is empty. Add your keyword, for example ["link"].');
+  if (defaultMode === "keyword" && !keywords.length) {
+    throw new FatalError('rules.json: link.keywords is empty. Add your keyword, for example ["details"].');
+  }
+  for (const [mediaId, p] of Object.entries(posts)) {
+    const needsWords = p.mode === "keyword" || ((p.mode === "auto" || p.mode === "link") && (p.trigger || trigger) === "keywords");
+    if (needsWords && !p.keywords.length && !keywords.length) {
+      throw new FatalError(`rules.json: post ${mediaId} needs keywords, but neither the post nor link.keywords has any.`);
+    }
   }
   if (usesQuiz && !quiz.replies.length) {
     throw new FatalError("rules.json: quiz.replies needs at least one reply text.");
@@ -219,9 +271,11 @@ function loadRules() {
   if (usesLink) {
     // Every DM text that says {link} needs a real link to put there.
     const places = [{ where: "link", url: link.url, dm: link.dm }];
-    for (const [mediaId, p] of Object.entries(posts)) {
-      if (p.mode === "keyword" || p.mode === "auto" || p.mode === "link") {
-        places.push({ where: `post ${mediaId}`, url: p.url || link.url, dm: p.dm.length ? p.dm : link.dm });
+    const checkList = Object.entries(posts).map(([mediaId, p]) => [`post ${mediaId}`, p]);
+    if (newPosts) checkList.push(["newPosts", newPosts.normalized]);
+    for (const [where, p] of checkList) {
+      if (!p.riddle && (p.mode === "keyword" || p.mode === "auto" || p.mode === "link")) {
+        places.push({ where, url: p.url || link.url, dm: p.dm.length ? p.dm : link.dm });
       }
     }
     for (const place of places) {
@@ -239,7 +293,7 @@ function loadRules() {
     }
   }
 
-  return { defaultMode, quiz, link, posts };
+  return { defaultMode, quiz, link, posts, newPosts, ownPosts: new Set(Object.keys(posts)) };
 }
 
 // Any digit counts as "has a number": 0-9 and also digits of other scripts like Hindi (०-९).
@@ -251,9 +305,13 @@ function decide(config, text, mediaId) {
   const post = config.posts[mediaId];
   const mode = post ? post.mode : config.defaultMode;
   if (mode === "off") return null;
+  if (post && post.riddle) return "quiz"; // riddle post (url is google.com): result reply for every comment, never a DM
 
-  const hasKeyword = () => config.link.matchers.some((m) => m.test(text));
-  const wantsLink = () => config.link.trigger === "any" || hasKeyword();
+  // A post can have its own trigger and keywords; otherwise the general ones from "link" are used.
+  const matchers = (post && post.matchers) || config.link.matchers;
+  const trigger = (post && post.trigger) || config.link.trigger;
+  const hasKeyword = () => matchers.some((m) => m.test(text));
+  const wantsLink = () => trigger === "any" || hasKeyword();
 
   // keyword mode: the keyword always wins, even if the comment also has a number
   if (mode === "keyword") return hasKeyword() ? "link" : "quiz";
@@ -291,6 +349,7 @@ const EMPTY_STATE = () => ({
   pauseUntil: 0,
   cycles: 0,
   lastPick: {},
+  assigned: {}, // posts that got the "newPosts" settings automatically: mediaId -> settings
 });
 
 let mongoCollection = null;
@@ -508,6 +567,15 @@ async function runCycle(state, config, ownUsername) {
   let scanFailed = false;
   for (const m of media.data.data || []) {
     const count = m.comments_count || 0;
+
+    // A post we have never seen before, published recently: give it the current "newPosts" link.
+    const isNewPost = !noteOnly && !(m.id in state.mediaCounts) && now - new Date(m.timestamp).getTime() < NEW_POST_WINDOW_MS;
+    if (isNewPost && config.newPosts && !config.ownPosts.has(m.id) && !state.assigned[m.id]) {
+      state.assigned[m.id] = { ...config.newPosts.saved, at: new Date(now).toISOString() };
+      config.posts[m.id] = config.newPosts.normalized;
+      log(`New post found (ID ${m.id}). ` + describeNewPost(config.newPosts));
+    }
+
     if (!fullScan && state.mediaCounts[m.id] === count) continue; // nothing new on this post
 
     const result = await getComments(m.id, state.comments, noteOnly);
@@ -792,6 +860,11 @@ function startStatusPage() {
     .listen(port, () => log(`Status page is open on port ${port}.`));
 }
 
+function describeNewPost(newPosts) {
+  if (newPosts.normalized.riddle) return "riddle post (google.com): every comment gets the result reply, no DM.";
+  return `referral post: every comment gets this link by DM: ${newPosts.saved.url}`;
+}
+
 function describeMode(config) {
   const words = config.link.keywords.join(", ");
   const linkTo = config.link.trigger === "any" ? "every comment" : `comments with a keyword (${words})`;
@@ -817,6 +890,16 @@ async function main() {
   startStatusPage();
   const state = await loadState();
 
+  // Bring back the links that earlier posts got automatically. A post listed in rules.json "posts" wins.
+  for (const [mediaId, saved] of Object.entries(state.assigned || {})) {
+    if (config.ownPosts.has(mediaId)) continue;
+    try {
+      config.posts[mediaId] = normalizePost(`saved post ${mediaId}`, saved, config.defaultMode);
+    } catch (e) {
+      log(`Skipping the saved settings of post ${mediaId}: ${e.message}`);
+    }
+  }
+
   const me = await api("GET", `/${IG_ID}`, { fields: "username" });
   stopIfSerious(me, "checking your account");
   if (!me.ok) throw new FatalError("Could not reach your Instagram account: " + me.message);
@@ -829,6 +912,7 @@ async function main() {
       `Default mode: ${config.defaultMode}. ` +
       describeMode(config) +
       ` Posts with their own setting: ${Object.keys(config.posts).length}.` +
+      (config.newPosts ? ` Your next new post: ${describeNewPost(config.newPosts)}` : "") +
       (DRY_RUN ? " DRY RUN: nothing will be sent." : "")
   );
 

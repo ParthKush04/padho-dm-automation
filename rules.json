@@ -11,8 +11,8 @@
   "link": {
     "trigger": "keywords",
     "keywords": [
-      "link",
-      "links"
+      "details",
+      "detail"
     ],
     "url": "https://jobs.micro1.ai/post/d092dbbf-f5e8-4fe7-8372-fdce57e183f4?referralCode=925af3ad-e64b-44b6-9fc0-89fd6e559412&utm_source=referral&utm_medium=share&utm_campaign=job_referral",
     "dmStyle": "button",
@@ -24,15 +24,22 @@
       "Thanks! It's in your DMs now. Look in message requests if you don't see it inbox"
     ],
     "dm": [
-      "Hi {username}! Here is the link you asked for. Tap the button below {link}\n\n",
-      "Hey {username}, thanks for commenting! Tap the button below to open it {link}\n\n",
-      "Hello {username}! As promised, your link is on the button below {link}\n\n",
-      "Thanks for your comment, {username}! Open the link with the button below {link}\n\n"
+      "Hi {username}! Here is the link you asked for. Tap the button below {link}\n\n(Referral link)",
+      "Hey {username}, thanks for commenting! Tap the button below to open it {link}\n\n(Referral link)",
+      "Hello {username}! As promised, your link is on the button below {link}\n\n(Referral link)",
+      "Thanks for your comment, {username}! Open the link with the button below {link}\n\n(Referral link)"
     ]
   },
+  "newPosts": {
+    "mode": "link",
+    "trigger": "any",
+    "url": "https://jobs.micro1.ai/post/d092dbbf-f5e8-4fe7-8372-fdce57e183f4?referralCode=925af3ad-e64b-44b6-9fc0-89fd6e559412&utm_source=referral&utm_medium=share&utm_campaign=job_referral"
+  },
   "posts": {
-    "PUT_A_MEDIA_ID_HERE": {
-      "mode": "link"
+    "18192899974414135": {
+      "mode": "link",
+      "trigger": "any",
+      "url": "https://jobs.micro1.ai/post/d092dbbf-f5e8-4fe7-8372-fdce57e183f4?referralCode=925af3ad-e64b-44b6-9fc0-89fd6e559412&utm_source=referral&utm_medium=share&utm_campaign=job_referral"
     }
   }
 }
