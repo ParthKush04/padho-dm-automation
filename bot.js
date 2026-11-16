@@ -65,7 +65,15 @@ const IG_ID = process.env.IG_ID;
 const BASE = process.env.GRAPH_BASE || "https://graph.facebook.com/v27.0";
 
 const POLL_SECONDS = num("POLL_SECONDS", 60); // how often to check for new comments
-const MEDIA_LIMIT = num("MEDIA_LIMIT", 10); // how many recent posts to watch
+// How many posts to watch. Default: all of them (up to 1000). Set MEDIA_LIMIT=10 to watch only the newest 10.
+const MAX_MEDIA = 1000;
+const MEDIA_LIMIT = (() => {
+  const raw = String(process.env.MEDIA_LIMIT || "").trim().toLowerCase();
+  if (!raw || raw === "all") return MAX_MEDIA;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_MEDIA) : MAX_MEDIA;
+})();
+const FULL_SCAN_EVERY = num("FULL_SCAN_EVERY", 30); // every Nth check, re-read the newest comments of every post
 const DELAY_SECONDS = num("DELAY_SECONDS", 5); // wait between two people
 const MAX_DMS_PER_HOUR = num("MAX_DMS_PER_HOUR", 200); // safety cap on DMs (Meta's own limit is 750)
 const MAX_REPLIES_PER_HOUR = num("MAX_REPLIES_PER_HOUR", 300); // safety cap on public replies
@@ -275,6 +283,7 @@ function textsFor(config, action, mediaId) {
 
 const EMPTY_STATE = () => ({
   started: false,
+  watchAll: false,
   comments: {},
   sent: [],
   sentPub: [],
@@ -420,13 +429,22 @@ function stopIfSerious(result, doing) {
   }
 }
 
+// Lists your posts, newest first, page by page, until MEDIA_LIMIT posts are collected.
 async function getRecentMedia() {
-  const r = await api("GET", `/${IG_ID}/media`, {
-    fields: "id,comments_count,timestamp",
-    limit: String(MEDIA_LIMIT),
-  });
-  stopIfSerious(r, "reading your posts");
-  return r;
+  const all = [];
+  let after = null;
+  while (all.length < MEDIA_LIMIT) {
+    const query = { fields: "id,comments_count,timestamp", limit: String(Math.min(50, MEDIA_LIMIT - all.length)) };
+    if (after) query.after = after;
+    const r = await api("GET", `/${IG_ID}/media`, query);
+    stopIfSerious(r, "reading your posts");
+    if (!r.ok) return r;
+    const list = r.data.data || [];
+    all.push(...list);
+    after = r.data.paging && r.data.paging.next && r.data.paging.cursors ? r.data.paging.cursors.after : null;
+    if (!after || !list.length) break;
+  }
+  return { ok: true, data: { data: all.slice(0, MEDIA_LIMIT) } };
 }
 
 // Reads the comments of one post, page by page.
@@ -472,7 +490,11 @@ async function runCycle(state, config, ownUsername) {
 
   state.cycles += 1;
   const firstRun = !state.started;
-  const fullScan = firstRun || state.cycles % 10 === 0; // every 10th check, look at every post again
+  // When this version starts for the first time on an existing memory, it begins watching older posts too.
+  // Their existing comments are only noted, never answered, just like on a first run.
+  const upgradeRun = state.started && !state.watchAll;
+  const noteOnly = firstRun || upgradeRun;
+  const fullScan = noteOnly || state.cycles % FULL_SCAN_EVERY === 0; // now and then, look at every post again
 
   const media = await getRecentMedia();
   if (!media.ok) {
@@ -488,13 +510,13 @@ async function runCycle(state, config, ownUsername) {
     const count = m.comments_count || 0;
     if (!fullScan && state.mediaCounts[m.id] === count) continue; // nothing new on this post
 
-    const result = await getComments(m.id, state.comments, firstRun);
+    const result = await getComments(m.id, state.comments, noteOnly);
     for (const c of result.comments) {
       if (state.comments[c.id]) continue;
       const rec = { seenAt: now, status: "ignored" };
       const age = now - new Date(c.timestamp).getTime();
       const isMine = ownUsername && c.username === ownUsername;
-      const action = !firstRun && !isMine && age < REPLY_WINDOW_MS ? decide(config, c.text, m.id) : null;
+      const action = !noteOnly && !isMine && age < REPLY_WINDOW_MS ? decide(config, c.text, m.id) : null;
 
       if (action) {
         rec.status = "pending";
@@ -523,10 +545,15 @@ async function runCycle(state, config, ownUsername) {
   }
 
   // Only mark the first run as complete when every post was read without a problem.
-  if (firstRun && !scanFailed) {
-    state.started = true;
+  if (noteOnly && !scanFailed) {
     const total = Object.keys(state.comments).length;
-    log(`First run: noted ${total} existing comment(s). They will NOT get a reply. Only new comments from now on.`);
+    if (firstRun) {
+      log(`First run: noted ${total} existing comment(s). They will NOT get a reply. Only new comments from now on.`);
+    } else {
+      log(`Now watching all ${(media.data.data || []).length} posts. Existing comments were noted and will NOT get a reply. Only new comments from now on.`);
+    }
+    state.started = true;
+    state.watchAll = true;
   }
   await saveState(state);
 
@@ -797,7 +824,8 @@ async function main() {
 
   log(`Connected as @${ownUsername}.`);
   log(
-    `Watching the last ${MEDIA_LIMIT} posts, checking every ${POLL_SECONDS}s. ` +
+    (MEDIA_LIMIT >= MAX_MEDIA ? "Watching all your posts" : `Watching the last ${MEDIA_LIMIT} posts`) +
+      `, checking every ${POLL_SECONDS}s. ` +
       `Default mode: ${config.defaultMode}. ` +
       describeMode(config) +
       ` Posts with their own setting: ${Object.keys(config.posts).length}.` +
